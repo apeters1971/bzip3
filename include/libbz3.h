@@ -121,8 +121,9 @@ BZIP3_API int bz3_decompress(const uint8_t * in, uint8_t * out, size_t in_size, 
  *      - Core state structure (sizeof(struct bz3_state))
  *      - Swap buffer (bz3_bound(block_size) bytes)
  *      - SAIS array (BWT_BOUND(block_size) * sizeof(int32_t) bytes)
- *      - LZP lookup table ((1 << LZP_DICTIONARY) * sizeof(int32_t) bytes)
+ *      - LZP lookup table + stamp ((1 << LZP_DICTIONARY) * (sizeof(int32_t) + 1) bytes)
  *      - Compression state (sizeof(state))
+ *      - Reusable libsais BWT/unBWT contexts (notably ~256KiB unBWT bigram table)
  *    - All memory remains allocated until bz3_free()
  * 
  * Additional memory may be used depending on API used from here.
@@ -131,7 +132,7 @@ BZIP3_API int bz3_decompress(const uint8_t * in, uint8_t * out, size_t in_size, 
  * 
  * 1. bz3_encode_block() / bz3_decode_block():
  *    - Uses pre-allocated memory from bz3_new()
- *    - No additional memory allocation except for libsais (usually ~16KiB)
+ *    - No additional per-block libsais context allocation
  *    - Peak memory usage of physical RAM varies with compression stages:
  *      - LZP: Uses LZP lookup table + swap buffer
  *      - BWT: Uses SAIS array + swap buffer

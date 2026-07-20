@@ -121,7 +121,7 @@ static int bz3_check_buffer_size(size_t buffer_size, s32 lzp_size, s32 rle_size,
     return (effective_lzp_size <= buffer_size) && (effective_rle_size <= buffer_size) && (effective_orig_size <= buffer_size);
 }
 
-static void lzp_reset_lut(s32 * RESTRICT lut, u8 * RESTRICT stamp, u32 * epoch) {
+static void lzp_reset_lut(s32 * RESTRICT lut, u8 * RESTRICT stamp, u8 * epoch) {
     if (++(*epoch) == 0) {
         memset(lut, 0, sizeof(s32) * (1 << LZP_DICTIONARY));
         memset(stamp, 0, sizeof(u8) * (1 << LZP_DICTIONARY));
@@ -130,7 +130,7 @@ static void lzp_reset_lut(s32 * RESTRICT lut, u8 * RESTRICT stamp, u32 * epoch) 
 }
 
 static s32 lzp_encode_block(const u8 * RESTRICT in, const u8 * in_end, u8 * RESTRICT out, u8 * out_end,
-                            s32 * RESTRICT lut, u8 * RESTRICT stamp, u32 epoch) {
+                            s32 * RESTRICT lut, u8 * RESTRICT stamp, u8 epoch) {
     const u8 * ins = in;
     const u8 * outs = out;
     const u8 * out_eob = out_end - 8;
@@ -145,7 +145,7 @@ static s32 lzp_encode_block(const u8 * RESTRICT in, const u8 * in_end, u8 * REST
     while (in < in_end - LZP_MIN_MATCH - 32 && out < out_eob) {
         u32 idx = (ctx >> 15 ^ ctx ^ ctx >> 3) & ((s32)(1 << LZP_DICTIONARY) - 1);
         s32 val = stamp[idx] == epoch ? lut[idx] : 0;
-        stamp[idx] = (u8)epoch;
+        stamp[idx] = epoch;
         lut[idx] = in - ins;
         if (val > 0) {
             const u8 * RESTRICT ref = ins + val;
@@ -196,7 +196,7 @@ static s32 lzp_encode_block(const u8 * RESTRICT in, const u8 * in_end, u8 * REST
     while (in < in_end && out < out_eob) {
         u32 idx = (ctx >> 15 ^ ctx ^ ctx >> 3) & ((s32)(1 << LZP_DICTIONARY) - 1);
         s32 val = stamp[idx] == epoch ? lut[idx] : 0;
-        stamp[idx] = (u8)epoch;
+        stamp[idx] = epoch;
         lut[idx] = (s32)(in - ins);
 
         u8 next = *out++ = *in++;
@@ -208,7 +208,7 @@ static s32 lzp_encode_block(const u8 * RESTRICT in, const u8 * in_end, u8 * REST
 }
 
 static s32 lzp_decode_block(const u8 * RESTRICT in, const u8 * in_end, s32 * RESTRICT lut, u8 * RESTRICT stamp,
-                            u32 epoch, u8 * RESTRICT out, const u8 * out_end) {
+                            u8 epoch, u8 * RESTRICT out, const u8 * out_end) {
     const u8 * outs = out;
 
     for (s32 i = 0; i < 4; ++i) *out++ = *in++;
@@ -218,7 +218,7 @@ static s32 lzp_decode_block(const u8 * RESTRICT in, const u8 * in_end, s32 * RES
     while (in < in_end && out < out_end) {
         u32 idx = (ctx >> 15 ^ ctx ^ ctx >> 3) & ((s32)(1 << LZP_DICTIONARY) - 1);
         s32 val = stamp[idx] == epoch ? lut[idx] : 0;
-        stamp[idx] = (u8)epoch;
+        stamp[idx] = epoch;
         lut[idx] = (s32)(out - outs);
         if (*in == MATCH && val > 0) {
             in++;
@@ -265,7 +265,7 @@ static s32 lzp_decode_block(const u8 * RESTRICT in, const u8 * in_end, s32 * RES
 }
 
 static s32 lzp_compress(const u8 * RESTRICT in, u8 * RESTRICT out, s32 n, s32 * RESTRICT lut, u8 * RESTRICT stamp,
-                        u32 * epoch) {
+                        u8 * epoch) {
     if (n < LZP_MIN_MATCH + 32) return -1;
 
     lzp_reset_lut(lut, stamp, epoch);
@@ -274,7 +274,7 @@ static s32 lzp_compress(const u8 * RESTRICT in, u8 * RESTRICT out, s32 n, s32 * 
 }
 
 static s32 lzp_decompress(const u8 * RESTRICT in, u8 * RESTRICT out, s32 n, s32 max, s32 * RESTRICT lut,
-                          u8 * RESTRICT stamp, u32 * epoch) {
+                          u8 * RESTRICT stamp, u8 * epoch) {
     if (n < 4) return -1;
 
     lzp_reset_lut(lut, stamp, epoch);
@@ -346,7 +346,9 @@ static int mrled(u8 * RESTRICT in, u8 * RESTRICT out, s32 outlen, s32 maxin) {
             for (run = 0; ip < maxin && (pc = in[ip++]) == 255; run += 255)
                 ;
             run += pc + 1;
-            for (; run > 0 && op < outlen; --run) out[op++] = c;
+            if (run > outlen - op) run = outlen - op;
+            memset(out + op, (u8)c, (size_t)run);
+            op += run;
         } else
             out[op++] = c;
     }
@@ -370,40 +372,41 @@ typedef struct {
 #define write_out(s, c) (s)->out_queue[(s)->output_ptr++] = (c)
 #define read_in(s) ((s)->input_ptr < (s)->input_max ? (s)->in_queue[(s)->input_ptr++] : -1)
 
-#define decode_bit(s, high, low, code, ctx, c1, c2, f, bit)                         \
+#define decode_bit(s, high, low, code, ctx, c1, c2, f, bit, ip, ip_end)              \
     do {                                                                            \
         const int p0 = (s)->C0[ctx];                                                \
         const int p1 = (s)->C1[c1][ctx];                                            \
         const int p2 = (s)->C1[c2][ctx];                                            \
         const int p = ((p0 + p1) * 7 + p2 + p2) >> 4;                               \
         const int j = p >> 12;                                                      \
-        const int x1 = (s)->C2[2 * (ctx) + (f)][j];                                   \
-        const int x2 = (s)->C2[2 * (ctx) + (f)][j + 1];                               \
-        const int ssep = x1 + (((x2 - x1) * (p & 4095)) >> 12);                       \
-        const u32 mid = (low) + (((u64)((high) - (low)) * (ssep * 3 + p)) >> 18);     \
-        (bit) = (code) <= mid;                                                        \
-        if (bit)                                                                      \
-            (high) = mid;                                                             \
-        else                                                                          \
-            (low) = mid + 1;                                                          \
-        while (((low) ^ (high)) < (1 << 24)) {                                       \
-            (low) <<= 8;                                                              \
-            (high) = ((high) << 8) + 255;                                             \
-            (code) = ((code) << 8) + read_in(s);                                      \
-        }                                                                             \
-        if (bit) {                                                                    \
-            update1((s)->C0[ctx], 2);                                                 \
-            update1((s)->C1[c1][ctx], 4);                                             \
-            update1((s)->C2[2 * (ctx) + (f)][j], 6);                                  \
-            update1((s)->C2[2 * (ctx) + (f)][j + 1], 6);                              \
-            (ctx) += (ctx) + 1;                                                       \
-        } else {                                                                      \
-            update0((s)->C0[ctx], 2);                                                 \
-            update0((s)->C1[c1][ctx], 4);                                             \
-            update0((s)->C2[2 * (ctx) + (f)][j], 6);                                  \
-            update0((s)->C2[2 * (ctx) + (f)][j + 1], 6);                            \
-            (ctx) += (ctx);                                                           \
-        }                                                                             \
+        u16 * RESTRICT c2row = (s)->C2[2 * (ctx) + (f)];                            \
+        const int x1 = c2row[j];                                                    \
+        const int x2 = c2row[j + 1];                                                \
+        const int ssep = x1 + (((x2 - x1) * (p & 4095)) >> 12);                     \
+        const u32 mid = (low) + (((u64)((high) - (low)) * (ssep * 3 + p)) >> 18);   \
+        (bit) = (code) <= mid;                                                      \
+        if (bit)                                                                    \
+            (high) = mid;                                                           \
+        else                                                                        \
+            (low) = mid + 1;                                                        \
+        while (UNLIKELY(((low) ^ (high)) < (1 << 24))) {                            \
+            (low) <<= 8;                                                            \
+            (high) = ((high) << 8) + 255;                                           \
+            (code) = ((code) << 8) + ((ip) < (ip_end) ? (int)*(ip)++ : -1);         \
+        }                                                                           \
+        if (bit) {                                                                  \
+            update1((s)->C0[ctx], 2);                                               \
+            update1((s)->C1[c1][ctx], 4);                                           \
+            update1(c2row[j], 6);                                                   \
+            update1(c2row[j + 1], 6);                                               \
+            (ctx) += (ctx) + 1;                                                     \
+        } else {                                                                    \
+            update0((s)->C0[ctx], 2);                                               \
+            update0((s)->C1[c1][ctx], 4);                                           \
+            update0(c2row[j], 6);                                                   \
+            update0(c2row[j + 1], 6);                                               \
+            (ctx) += (ctx);                                                         \
+        }                                                                           \
     } while (0)
 
 #define update0(p, x) (p) = ((p) - ((p) >> x))
@@ -447,14 +450,27 @@ typedef struct {
         (c) <<= 1;                                                                  \
     } while (0)
 
-static void begin(state * s) {
-    prefetch(s);
-    for (int i = 0; i < 256; i++) s->C0[i] = 1 << 15;
+static state cm_init_template;
+static int cm_tables_ready;
+
+static void cm_init_tables(void) {
+    if (cm_tables_ready) return;
+    for (int i = 0; i < 256; i++) cm_init_template.C0[i] = 1 << 15;
     for (int i = 0; i < 256; i++)
-        for (int j = 0; j < 256; j++) s->C1[i][j] = 1 << 15;
+        for (int j = 0; j < 256; j++) cm_init_template.C1[i][j] = 1 << 15;
     for (int i = 0; i < 2; i++)
         for (int j = 0; j < 256; j++)
-            for (int k = 0; k < 17; k++) s->C2[2 * j + i][k] = (k << 12) - (k == 16);  // Firm difference from stdpack.
+            for (int k = 0; k < 17; k++)
+                cm_init_template.C2[2 * j + i][k] = (k << 12) - (k == 16);
+    cm_tables_ready = 1;
+}
+
+static void begin(state * s) {
+    cm_init_tables();
+    prefetch(s);
+    memcpy(s->C0, cm_init_template.C0, sizeof(s->C0));
+    memcpy(s->C1, cm_init_template.C1, sizeof(s->C1));
+    memcpy(s->C2, cm_init_template.C2, sizeof(s->C2));
 }
 
 static void encode_bytes(state * s, u8 * buf, s32 size) {
@@ -499,11 +515,13 @@ static void encode_bytes(state * s, u8 * buf, s32 size) {
 static void decode_bytes(state * s, u8 * c, s32 size) {
     u32 high = 0xFFFFFFFF, low = 0, c1 = 0, c2 = 0, run = 0, code = 0;
     u8 bit;
+    const u8 * RESTRICT ip = s->in_queue + s->input_ptr;
+    const u8 * RESTRICT ip_end = s->in_queue + s->input_max;
 
-    code = (code << 8) + read_in(s);
-    code = (code << 8) + read_in(s);
-    code = (code << 8) + read_in(s);
-    code = (code << 8) + read_in(s);
+    code = (code << 8) + (ip < ip_end ? (int)*ip++ : -1);
+    code = (code << 8) + (ip < ip_end ? (int)*ip++ : -1);
+    code = (code << 8) + (ip < ip_end ? (int)*ip++ : -1);
+    code = (code << 8) + (ip < ip_end ? (int)*ip++ : -1);
 
     for (s32 i = 0; i < size; i++) {
         if (c1 == c2)
@@ -514,18 +532,20 @@ static void decode_bytes(state * s, u8 * c, s32 size) {
         const int f = run > 2;
         int ctx = 1;
 
-        decode_bit(s, high, low, code, ctx, c1, c2, f, bit);
-        decode_bit(s, high, low, code, ctx, c1, c2, f, bit);
-        decode_bit(s, high, low, code, ctx, c1, c2, f, bit);
-        decode_bit(s, high, low, code, ctx, c1, c2, f, bit);
-        decode_bit(s, high, low, code, ctx, c1, c2, f, bit);
-        decode_bit(s, high, low, code, ctx, c1, c2, f, bit);
-        decode_bit(s, high, low, code, ctx, c1, c2, f, bit);
-        decode_bit(s, high, low, code, ctx, c1, c2, f, bit);
+        decode_bit(s, high, low, code, ctx, c1, c2, f, bit, ip, ip_end);
+        decode_bit(s, high, low, code, ctx, c1, c2, f, bit, ip, ip_end);
+        decode_bit(s, high, low, code, ctx, c1, c2, f, bit, ip, ip_end);
+        decode_bit(s, high, low, code, ctx, c1, c2, f, bit, ip, ip_end);
+        decode_bit(s, high, low, code, ctx, c1, c2, f, bit, ip, ip_end);
+        decode_bit(s, high, low, code, ctx, c1, c2, f, bit, ip, ip_end);
+        decode_bit(s, high, low, code, ctx, c1, c2, f, bit, ip, ip_end);
+        decode_bit(s, high, low, code, ctx, c1, c2, f, bit, ip, ip_end);
 
         c2 = c1;
         c[i] = c1 = (u8)ctx;
     }
+
+    s->input_ptr = (s32)(ip - s->in_queue);
 }
 
 /* Public API. */
@@ -535,7 +555,7 @@ struct bz3_state {
     s32 block_size;
     s32 *sais_array, *lzp_lut;
     u8 * lzp_stamp;
-    u32 lzp_epoch;
+    u8 lzp_epoch;
     state * cm_state;
     void *bwt_ctx, *unbwt_ctx;
     s8 last_error;
@@ -1069,6 +1089,14 @@ BZIP3_API size_t bz3_min_memory_needed(int32_t block_size) {
 
     // LZP lookup table (lzp_lut + lzp_stamp)
     total_size += (1 << LZP_DICTIONARY) * (sizeof(int32_t) + sizeof(uint8_t));
+
+    // Reusable libsais BWT context (bucket array; excludes allocator alignment slack)
+    total_size += 8 * 256 * sizeof(int32_t);
+
+    // Reusable libsais unBWT context (bigram histogram + fastbits lookup)
+    total_size += 256 * 256 * sizeof(uint32_t);
+    total_size += (1u + (1u << 17)) * sizeof(uint16_t);
+
     return total_size;
 }
 
