@@ -1,6 +1,10 @@
 name: Build
 
-on: [ push, pull_request ]
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '0 2 * * 5'  # Every Friday at 2am
 
 jobs:
 
@@ -8,7 +12,7 @@ jobs:
     name: Package
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v7
     - name: Configure
       run: |
         ./bootstrap.sh
@@ -16,7 +20,7 @@ jobs:
     - name: Make source package
       run: make VERSION=${{ github.sha }} dist
     - name: Upload source package artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: bzip3-${{ github.sha }}
         path: bzip3-${{ github.sha }}.tar.gz
@@ -35,7 +39,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Download source package artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: bzip3-${{ github.sha }}
     - name: Extract source package
@@ -65,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Download source package artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: bzip3-${{ github.sha }}
     - name: Extract source package
@@ -89,6 +93,9 @@ jobs:
           apt install -q -y clang gcc make
         run: |
           cd /bzip3
+          if [ ${{ matrix.arch }} = armv6 -a ${{ matrix.compiler }} = clang ]; then
+            export CFLAGS='-march=armv6'  # or we get "Illegal instruction" crashes
+          fi
           ./configure CC=${{ matrix.compiler }} --${{ matrix.feature }} --disable-arch-native --disable-link-time-optimization
           make && make roundtrip test
   build-archs-ubuntu:
@@ -103,7 +110,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Download source package artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: bzip3-${{ github.sha }}
     - name: Extract source package
@@ -134,7 +141,7 @@ jobs:
     name: Build with CMake
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v7
     - name: CMake
       run: cmake -B build
     - name: Make

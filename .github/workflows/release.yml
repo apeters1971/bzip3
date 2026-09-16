@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7
       - name: Configure
         run: |
           ./bootstrap.sh
@@ -29,7 +29,7 @@ jobs:
         run: |
           ./bzip3 -e bzip3-${{ github.ref_name }}.tar
       - name: Publish Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             bzip3-${{ github.ref_name }}.tar
@@ -41,7 +41,7 @@ jobs:
             bzip3-${{ github.ref_name }}.tar.zst
             bzip3-${{ github.ref_name }}.zip
       - name: Upload source package artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bzip3-${{ github.ref_name }}
           path: bzip3-${{ github.ref_name }}.tar.gz
@@ -59,7 +59,7 @@ jobs:
           - [ "i686", "CC=i686-w64-mingw32-gcc --host i686-w64-mingw32 --enable-static-exe --disable-arch-native", "gcc-mingw-w64-i686" ]
     steps:
       - name: Download source package artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: bzip3-${{ github.ref_name }}
       - name: Extract source package
@@ -76,7 +76,7 @@ jobs:
           make
           make DESTDIR=$(pwd)/output install-exec
       - name: Publish binary
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             output/bzip3-${{ matrix.target[0] }}*
